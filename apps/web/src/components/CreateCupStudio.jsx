@@ -114,6 +114,14 @@ function fileToUrl(file) {
   return file ? URL.createObjectURL(file) : ''
 }
 
+function colorDistance(a, b) {
+  return Math.sqrt(
+    ((a[0] - b[0]) ** 2)
+    + ((a[1] - b[1]) ** 2)
+    + ((a[2] - b[2]) ** 2),
+  )
+}
+
 function loadImage(src) {
   return new Promise((resolve, reject) => {
     if (!src) {
@@ -167,6 +175,74 @@ function drawFittedText(ctx, text, maxWidth, y, color) {
     ctx.font = `900 ${fontSize}px Inter, Arial, sans-serif`
   }
   ctx.fillText(safeText, 0, y)
+}
+
+async function removeLogoBackground(file) {
+  const sourceUrl = fileToUrl(file)
+  try {
+    const image = await loadImage(sourceUrl)
+    if (!image) return ''
+    const maxSize = 1600
+    const scale = Math.min(1, maxSize / Math.max(image.width, image.height))
+    const canvas = document.createElement('canvas')
+    canvas.width = Math.max(1, Math.round(image.width * scale))
+    canvas.height = Math.max(1, Math.round(image.height * scale))
+    const ctx = canvas.getContext('2d', { willReadFrequently: true })
+    if (!ctx) return sourceUrl
+    ctx.imageSmoothingEnabled = true
+    ctx.imageSmoothingQuality = 'high'
+    ctx.drawImage(image, 0, 0, canvas.width, canvas.height)
+
+    const frame = ctx.getImageData(0, 0, canvas.width, canvas.height)
+    const data = frame.data
+    const sample = Math.max(3, Math.min(24, Math.floor(Math.min(canvas.width, canvas.height) * 0.05)))
+    const corners = [
+      [0, 0],
+      [canvas.width - sample, 0],
+      [0, canvas.height - sample],
+      [canvas.width - sample, canvas.height - sample],
+    ]
+    const background = [0, 0, 0]
+    let count = 0
+
+    corners.forEach(([startX, startY]) => {
+      for (let y = startY; y < startY + sample; y += 1) {
+        for (let x = startX; x < startX + sample; x += 1) {
+          const index = (y * canvas.width + x) * 4
+          if (data[index + 3] < 20) continue
+          background[0] += data[index]
+          background[1] += data[index + 1]
+          background[2] += data[index + 2]
+          count += 1
+        }
+      }
+    })
+
+    if (!count) return canvas.toDataURL('image/png')
+    background[0] /= count
+    background[1] /= count
+    background[2] /= count
+
+    for (let index = 0; index < data.length; index += 4) {
+      const alpha = data[index + 3]
+      if (alpha < 20) continue
+      const color = [data[index], data[index + 1], data[index + 2]]
+      const distance = colorDistance(color, background)
+      const isNearWhite = color[0] > 242 && color[1] > 242 && color[2] > 242
+      const isBackground = distance < 34 || isNearWhite
+      const isSoftEdge = distance >= 34 && distance < 74
+      if (isBackground) {
+        data[index + 3] = 0
+      } else if (isSoftEdge) {
+        data[index + 3] = Math.round(alpha * ((distance - 34) / 40))
+      }
+    }
+
+    ctx.putImageData(frame, 0, 0)
+    return canvas.toDataURL('image/png')
+  } finally {
+    if (sourceUrl.startsWith('blob:')) URL.revokeObjectURL(sourceUrl)
+  }
 }
 
 function getCupPose(scenario) {
@@ -580,9 +656,12 @@ export function CreateCupStudio() {
   const sceneRef = useRef(null)
   const cameraRef = useRef(null)
   const autoRotateRef = useRef(true)
+  const wrapInputRef = useRef(null)
+  const logoInputRef = useRef(null)
   const [scenario, setScenario] = useState('none')
   const [wrapFile, setWrapFile] = useState(null)
   const [logoFile, setLogoFile] = useState(null)
+  const [logoUrl, setLogoUrl] = useState('')
   const [cupColor, setCupColor] = useState('#f3efe4')
   const [accentColor, setAccentColor] = useState('#0f766e')
   const [brandText, setBrandText] = useState('Cafe Luna')
@@ -629,7 +708,6 @@ export function CreateCupStudio() {
 
   const uploadedWrapUrl = useMemo(() => fileToUrl(wrapFile), [wrapFile])
   const wrapUrl = generatedArtworkUrl || uploadedWrapUrl
-  const logoUrl = useMemo(() => fileToUrl(logoFile), [logoFile])
   const activeScenario = scenarios[scenario]
   const selectedCup = cupDimensions
   const exportWidth = selectedCup.wrapWidth + bleed * 2
@@ -665,6 +743,32 @@ export function CreateCupStudio() {
     }))
   }
 
+  const handleLogoUpload = async (file) => {
+    setLogoFile(file)
+    if (!file) {
+      setLogoUrl('')
+      return
+    }
+    try {
+      setLogoUrl(await removeLogoBackground(file))
+    } catch {
+      setLogoUrl(fileToUrl(file))
+      setArtworkError('Logo background removal failed, so the original logo was used.')
+    }
+  }
+
+  const clearWrapFile = () => {
+    setWrapFile(null)
+    setGeneratedArtworkUrl('')
+    if (wrapInputRef.current) wrapInputRef.current.value = ''
+  }
+
+  const clearLogoFile = () => {
+    setLogoFile(null)
+    setLogoUrl('')
+    if (logoInputRef.current) logoInputRef.current.value = ''
+  }
+
   const selectScenario = (key) => {
     const defaults = sceneViewDefaults[key]
     setScenario(key)
@@ -680,6 +784,9 @@ export function CreateCupStudio() {
   const resetEditor = () => {
     setWrapFile(null)
     setLogoFile(null)
+    setLogoUrl('')
+    if (wrapInputRef.current) wrapInputRef.current.value = ''
+    if (logoInputRef.current) logoInputRef.current.value = ''
     setBrandText('MaDonals')
     setArtworkPrompt('premium eco cafe cup printable wrap with leaf pattern, clean logo panel, warm minimal layout')
     setGeneratedArtworkUrl('')
@@ -815,7 +922,7 @@ export function CreateCupStudio() {
   useEffect(() => {
     return () => {
       if (uploadedWrapUrl) URL.revokeObjectURL(uploadedWrapUrl)
-      if (logoUrl) URL.revokeObjectURL(logoUrl)
+      if (logoUrl.startsWith('blob:')) URL.revokeObjectURL(logoUrl)
     }
   }, [uploadedWrapUrl, logoUrl])
 
@@ -824,94 +931,11 @@ export function CreateCupStudio() {
     setIsGeneratingArtwork(true)
     try {
       const puter = await loadPuter()
-      const prompt = `
-You are an award-winning packaging designer working for premium global brands.
-
-TASK:
-
-Create a realistic packaging design concept using the provided brand information.
-
-This is a visual packaging concept for customer approval.
-
-Generate a high-quality realistic packaging design image that looks like it was created by a professional branding agency.
-
-BRAND INFORMATION:
-
-Brand Name:
-${brandText || 'Custom Brand'}
-
-Industry:
-${'Food & Beverage'}
-
-Customer Design Brief:
-${artworkPrompt}
-
-Primary Color:
-${cupColor}
-
-Accent Color:
-${accentColor}
-
-PACKAGING TYPE:
-
-${selectedCup.label}
-
-DESIGN REQUIREMENTS:
-
-* Premium commercial packaging design
-* Modern branding
-* Consistent visual identity
-* Professional typography
-* Elegant color palette
-* High-end packaging aesthetics
-* Strong shelf appeal
-* Suitable for real-world cafes, restaurants, food brands, and beverage companies
-
-LOGO APPLICATION:
-
-* Apply the uploaded logo naturally
-* Make logo placement professional
-* Ensure branding feels authentic
-* Maintain visual balance
-
-VISUAL STYLE:
-
-* Realistic packaging photography
-* Studio-quality presentation
-* Premium product showcase
-* Commercial advertising quality
-* Clean background
-* Professional lighting
-* High-resolution image
-
-DESIGN DIRECTION:
-
-${artworkPrompt}
-
-STRICTLY AVOID:
-
-* Template designs
-* Generic stock designs
-* Watermarks
-* Distorted logos
-* Low-quality graphics
-* Excessive clutter
-* Random text
-* AI-generated gibberish text
-
-GOAL:
-
-The customer should immediately feel:
-
-"Yes, I want my packaging to look like this."
-
-Create a realistic premium packaging concept image suitable for presenting to a paying customer.
-`;
-
-      const image = await puter.ai.txt2img(prompt, {
+      // const prompt = artworkPrompt,
+      const image = await puter.ai.txt2img(artworkPrompt, {
         provider: 'openai-image-generation',
         model: 'gpt-image-1-mini',
-        quality: 'medium',
+        quality: 'high',
       })
       setGeneratedArtworkUrl(image.src)
     } catch (error) {
@@ -1245,14 +1269,28 @@ Create a realistic premium packaging concept image suitable for presenting to a 
             {artworkError && <p className="editor-error">{artworkError}</p>}
             <label className="editor-upload">
               <span><ImageUp size={16} /> Print design upload</span>
-              <Input type="file" accept="image/png,image/jpeg,image/svg+xml" onChange={(event) => {
-                setWrapFile(event.target.files?.[0] ?? null)
-                setGeneratedArtworkUrl('')
-              }} />
+              <div className="upload-file-row">
+                <Input ref={wrapInputRef} type="file" accept="image/png,image/jpeg,image/svg+xml" onChange={(event) => {
+                  setWrapFile(event.target.files?.[0] ?? null)
+                  setGeneratedArtworkUrl('')
+                }} />
+                {(wrapFile || generatedArtworkUrl) && (
+                  <button className="remove-file-button" type="button" onClick={clearWrapFile} title="Remove image file" aria-label="Remove image file">
+                    <Trash2 size={16} />
+                  </button>
+                )}
+              </div>
             </label>
             <label className="editor-upload">
               <span><ImageUp size={16} /> Logo</span>
-              <Input type="file" accept="image/png,image/jpeg,image/svg+xml" onChange={(event) => setLogoFile(event.target.files?.[0] ?? null)} />
+              <div className="upload-file-row">
+                <Input ref={logoInputRef} type="file" accept="image/png,image/jpeg,image/svg+xml" onChange={(event) => handleLogoUpload(event.target.files?.[0] ?? null)} />
+                {logoFile && (
+                  <button className="remove-file-button" type="button" onClick={clearLogoFile} title="Remove logo file" aria-label="Remove logo file">
+                    <Trash2 size={16} />
+                  </button>
+                )}
+              </div>
             </label>
             <label className="editor-field">
               <span>Brand text</span>
@@ -1447,10 +1485,10 @@ Create a realistic premium packaging concept image suitable for presenting to a 
             })}
           </div>
           <div className="canvas-angle-controls" aria-label="Cup angle presets">
-            <button type="button" onClick={() => setCupAngle(0)} title="Front angle">Front</button>
-            <button type="button" onClick={() => setCupAngle(-Math.PI / 2)} title="Right angle">Right</button>
-            <button type="button" onClick={() => setCupAngle(Math.PI)} title="Back angle">Back</button>
-            <button type="button" onClick={() => setCupAngle(Math.PI / 2)} title="Left angle">Left</button>
+            <button type="button" onClick={() => setCupAngle(Math.PI)} title="Front angle">Front</button>
+            <button type="button" onClick={() => setCupAngle(Math.PI / 2)} title="Right angle">Right</button>
+            <button type="button" onClick={() => setCupAngle(0)} title="Back angle">Back</button>
+            <button type="button" onClick={() => setCupAngle(-Math.PI / 2)} title="Left angle">Left</button>
           </div>
         </div>
         <canvas ref={canvasRef} className="cup-canvas" aria-label="3D cup editor preview" />

@@ -456,6 +456,13 @@ select {
   padding: 4px;
 }
 
+.upload-file-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
 .range-control {
   display: grid;
   gap: 8px;
@@ -571,6 +578,25 @@ select {
   font-size: 13px;
   font-weight: 850;
   cursor: pointer;
+}
+
+.remove-file-button {
+  display: inline-flex;
+  width: 42px;
+  min-height: 42px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(185, 28, 28, 0.16);
+  border-radius: 8px;
+  background: #fff7f7;
+  padding: 0;
+  color: #b91c1c;
+  cursor: pointer;
+}
+
+.remove-file-button:hover {
+  border-color: rgba(185, 28, 28, 0.3);
+  background: #fef2f2;
 }
 
 .editor-stage {
@@ -779,6 +805,11 @@ select {
 }
 
 @media (max-width: 980px) {
+  body {
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+
   .cup-editor {
     height: auto;
     min-height: 100vh;
@@ -787,14 +818,17 @@ select {
   }
 
   .editor-sidebar {
+    order: 2;
     height: auto;
     min-height: auto;
     max-height: none;
     border-right: 0;
     border-bottom: 1px solid rgba(15, 23, 42, 0.1);
+    box-shadow: none;
   }
 
   .details-sidebar {
+    order: 3;
     height: auto;
     max-height: none;
     border-left: 0;
@@ -802,64 +836,221 @@ select {
   }
 
   .editor-stage {
-    height: 620px;
-    min-height: 620px;
+    order: 1;
+    height: min(680px, 78svh);
+    min-height: 520px;
   }
 
   .cup-canvas {
-    height: 620px;
+    height: min(680px, 78svh);
+    min-height: 520px;
   }
 
   .canvas-control-hub {
     bottom: 22px;
   }
+
+  .editor-tabs {
+    position: sticky;
+    top: 0;
+    z-index: 4;
+    box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
+  }
+
+  .editor-panel,
+  .details-panel {
+    max-width: 760px;
+    width: 100%;
+    justify-self: center;
+  }
 }
 
 @media (max-width: 640px) {
+  .cup-editor {
+    background: #f8fafc;
+  }
+
   .editor-sidebar {
-    padding: 16px;
+    gap: 12px;
+    padding: 14px;
+  }
+
+  .details-sidebar {
+    gap: 12px;
+    padding: 14px;
+  }
+
+  .editor-copy {
+    max-width: none;
+    margin-top: 10px;
+    font-size: 13px;
+    line-height: 1.5;
   }
 
   .editor-sidebar h1 {
-    font-size: 34px;
+    font-size: 30px;
+  }
+
+  .editor-tabs {
+    grid-template-columns: repeat(5, minmax(56px, 1fr));
+    gap: 4px;
+    overflow-x: auto;
+    padding: 5px;
+    scrollbar-width: none;
+  }
+
+  .editor-tabs::-webkit-scrollbar {
+    display: none;
+  }
+
+  .editor-tabs button {
+    min-height: 48px;
+    min-width: 56px;
+    font-size: 9px;
+  }
+
+  .editor-panel,
+  .details-panel {
+    padding: 12px;
+  }
+
+  .prompt-actions,
+  .export-actions,
+  .spec-grid,
+  .color-row,
+  .legend-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .upload-file-row {
+    grid-template-columns: minmax(0, 1fr) 42px;
+  }
+
+  .editor-field select,
+  .editor-field input[type="color"],
+  .prompt-input,
+  .number-field input {
+    font-size: 16px;
   }
 
   .scenario-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .scenario-button {
+    min-height: 58px;
   }
 
   .editable-grid {
     grid-template-columns: 1fr;
   }
 
+  .detail-row {
+    display: grid;
+    gap: 3px;
+  }
+
+  .detail-row b {
+    text-align: left;
+  }
+
+  .editor-stage {
+    height: 74svh;
+    min-height: 500px;
+  }
+
+  .cup-canvas {
+    height: 74svh;
+    min-height: 500px;
+  }
+
   .stage-toolbar {
     left: 14px;
     right: 14px;
     top: 14px;
-    align-items: flex-start;
-    flex-direction: column;
+    align-items: center;
+    padding: 10px 12px;
+  }
+
+  .stage-toolbar strong {
+    font-size: 15px;
+  }
+
+  .stage-status {
+    white-space: nowrap;
+    padding: 7px 9px;
   }
 
   .canvas-control-hub {
+    left: 14px;
+    right: 14px;
+    bottom: 14px;
+    display: grid;
+    grid-template-columns: 44px 44px 44px minmax(0, 1fr);
     max-width: calc(100% - 28px);
-    flex-wrap: wrap;
+    width: auto;
     gap: 8px;
+    padding: 8px;
+    transform: none;
+  }
+
+  .canvas-pill-button {
+    width: 44px;
+    padding: 0;
+    font-size: 0;
+  }
+
+  .canvas-pill-button svg {
+    flex: 0 0 auto;
   }
 
   .canvas-angle-controls {
-    flex: 1 1 100%;
-    width: 100%;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .canvas-scene-controls {
-    flex: 1 1 100%;
+    grid-column: 1 / -1;
     width: 100%;
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 
+  .canvas-scene-controls {
+    width: 100%;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .canvas-pill-button,
+  .canvas-icon-button,
   .canvas-scene-controls button,
   .canvas-angle-controls button {
     min-width: 0;
+    min-height: 40px;
+  }
+
+  .canvas-angle-controls button {
+    padding: 0 6px;
+    font-size: 11px;
+  }
+}
+
+@media (max-width: 420px) {
+  .editor-stage {
+    height: 72svh;
+    min-height: 470px;
+  }
+
+  .cup-canvas {
+    height: 72svh;
+    min-height: 470px;
+  }
+
+  .stage-toolbar {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .canvas-control-hub {
+    grid-template-columns: repeat(3, 44px) 1fr;
+  }
+
+  .canvas-angle-controls {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
