@@ -680,7 +680,7 @@ export function CreateCupStudio() {
   const resetEditor = () => {
     setWrapFile(null)
     setLogoFile(null)
-    setBrandText('Cafe Luna')
+    setBrandText('MaDonals')
     setArtworkPrompt('premium eco cafe cup printable wrap with leaf pattern, clean logo panel, warm minimal layout')
     setGeneratedArtworkUrl('')
     setArtworkError('')
@@ -824,23 +824,90 @@ export function CreateCupStudio() {
     setIsGeneratingArtwork(true)
     try {
       const puter = await loadPuter()
-      const prompt = [
-        'Create a production-ready printable 2D paper cup wrap design, not a cup mockup.',
-        'Output a wide horizontal packaging design for wrapping around a real paper cup.',
-        'Design must work as a flat print file with full-bleed background design.',
-        'Do not show a cup, hands, table, cafe scene, shadows, camera view, or any 3D object.',
-        'Do not draw visible dieline, crop marks, rulers, annotations, or technical labels into the design.',
-        'Leave a clean central safe-area brand panel for a sharp logo/text overlay.',
-        'Keep important details away from the left and right glue seam edges.',
-        'Extend background colors and patterns to every edge for bleed.',
-        `Cup size: ${selectedCup.label}; flat wrap: ${selectedCup.wrapWidth} x ${selectedCup.wrapHeight} mm.`,
-        `Bleed: ${bleed} mm; safe margin: ${safeMargin} mm; glue seam: ${seam} mm.`,
-        `Print method: ${printMethod}; paper: ${paperStock}; coating: ${coating}; quantity: ${quantity} cups.`,
-        `Reserve a quiet barcode/compliance area of about ${barcodeZone} x ${barcodeZone} mm near the back seam.`,
-        `Brand text: ${brandText || 'Custom brand'}.`,
-        `Base color: ${cupColor}; accent color: ${accentColor}.`,
-        `Printable design brief from user: ${artworkPrompt}`,
-      ].join(' ')
+      const prompt = `
+You are an award-winning packaging designer working for premium global brands.
+
+TASK:
+
+Create a realistic packaging design concept using the provided brand information.
+
+This is a visual packaging concept for customer approval.
+
+Generate a high-quality realistic packaging design image that looks like it was created by a professional branding agency.
+
+BRAND INFORMATION:
+
+Brand Name:
+${brandText || 'Custom Brand'}
+
+Industry:
+${'Food & Beverage'}
+
+Customer Design Brief:
+${artworkPrompt}
+
+Primary Color:
+${cupColor}
+
+Accent Color:
+${accentColor}
+
+PACKAGING TYPE:
+
+${selectedCup.label}
+
+DESIGN REQUIREMENTS:
+
+* Premium commercial packaging design
+* Modern branding
+* Consistent visual identity
+* Professional typography
+* Elegant color palette
+* High-end packaging aesthetics
+* Strong shelf appeal
+* Suitable for real-world cafes, restaurants, food brands, and beverage companies
+
+LOGO APPLICATION:
+
+* Apply the uploaded logo naturally
+* Make logo placement professional
+* Ensure branding feels authentic
+* Maintain visual balance
+
+VISUAL STYLE:
+
+* Realistic packaging photography
+* Studio-quality presentation
+* Premium product showcase
+* Commercial advertising quality
+* Clean background
+* Professional lighting
+* High-resolution image
+
+DESIGN DIRECTION:
+
+${artworkPrompt}
+
+STRICTLY AVOID:
+
+* Template designs
+* Generic stock designs
+* Watermarks
+* Distorted logos
+* Low-quality graphics
+* Excessive clutter
+* Random text
+* AI-generated gibberish text
+
+GOAL:
+
+The customer should immediately feel:
+
+"Yes, I want my packaging to look like this."
+
+Create a realistic premium packaging concept image suitable for presenting to a paying customer.
+`;
+
       const image = await puter.ai.txt2img(prompt, {
         provider: 'openai-image-generation',
         model: 'gpt-image-1-mini',
