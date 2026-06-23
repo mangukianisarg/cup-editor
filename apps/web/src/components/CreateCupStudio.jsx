@@ -1,10 +1,13 @@
-import { Camera, Coffee, Download, Hand, ImageUp, Layers, Palette, Pause, Play, RotateCcw, SlidersHorizontal, Square, Trash2, Utensils } from 'lucide-react'
+import { Camera, Coffee, Download, Hand, ImageUp, Pause, Play, RotateCcw, Square, Trash2, Utensils } from 'lucide-react'
 import React from 'react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import cafeSceneUrl from '../assets/scene-cafe.png'
 import handSceneUrl from '../assets/scene-hand.png'
+import lifestyleBaristaPourUrl from '../assets/lifestyle-barista-pour.png'
+import lifestyleCafeTableUrl from '../assets/lifestyle-cafe-table.png'
+import lifestyleDateUrl from '../assets/lifestyle-date.png'
 import restaurantSceneUrl from '../assets/scene-restaurant.png'
 import { Button } from './ui/button'
 import { Input } from './ui/input'
@@ -66,7 +69,6 @@ const scenarios = {
 
 const TEXTURE_WIDTH = 4096
 const TEXTURE_HEIGHT = 2048
-const PUTER_SCRIPT_URL = 'https://js.puter.com/v2/'
 const imageCache = new Map()
 const sceneImageUrls = {
   cafe: cafeSceneUrl,
@@ -74,35 +76,32 @@ const sceneImageUrls = {
   hand: handSceneUrl,
 }
 const sceneViewDefaults = {
-  none: { zoom: 5.05, cameraHeight: 1.2, cameraX: 0, cameraFov: 38, cameraTargetY: 0 },
-  cafe: { zoom: 6.45, cameraHeight: 1.05, cameraX: 0, cameraFov: 34, cameraTargetY: -0.16 },
+  none: { zoom: 7.2, cameraHeight: 1.2, cameraX: 0, cameraFov: 38, cameraTargetY: 0 },
+  cafe:  { zoom: 6.2, cameraHeight: 1.04, cameraX: 0, cameraFov: 35, cameraTargetY: -0.18 },
   restro: { zoom: 6.2, cameraHeight: 1.04, cameraX: 0, cameraFov: 35, cameraTargetY: -0.18 },
-  hand: { zoom: 5.85, cameraHeight: 1, cameraX: 0.04, cameraFov: 35, cameraTargetY: -0.18 },
+  hand: { zoom: 4.85, cameraHeight: 1, cameraX: 0.1, cameraFov: 35, cameraTargetY: -0.18 },
 }
 const sceneModelPlacement = {
   none: { position: [0, 0, 0], rotation: [0, -0.08, 0], scale: 1 },
-  cafe: { position: [0.55, -0.78, 0], rotation: [0, -0.08, 0], scale: 0.52 },
+  cafe:{ position: [0, -0.8, 0], rotation: [0, 0.08, 0], scale: 0.54 },
   restro: { position: [0, -0.8, 0], rotation: [0, 0.08, 0], scale: 0.54 },
   hand: { position: [-0.1, -0.68, 0], rotation: [0, -0.04, 0], scale: 0.66 },
 }
-
-function loadPuter() {
-  if (window.puter?.ai?.txt2img) return Promise.resolve(window.puter)
-  return new Promise((resolve, reject) => {
-    const existing = document.querySelector(`script[src="${PUTER_SCRIPT_URL}"]`)
-    if (existing) {
-      existing.addEventListener('load', () => resolve(window.puter), { once: true })
-      existing.addEventListener('error', () => reject(new Error('Unable to load Puter.js')), { once: true })
-      return
-    }
-    const script = document.createElement('script')
-    script.src = PUTER_SCRIPT_URL
-    script.async = true
-    script.onload = () => resolve(window.puter)
-    script.onerror = () => reject(new Error('Unable to load Puter.js'))
-    document.head.appendChild(script)
-  })
-}
+const CUP_MODEL_WIDTH_SCALE = 0.82
+const DEFAULT_ARTWORK_PROMPT = 'premium coffee cup wrap with botanical line art, warm minimal packaging pattern, clean logo-safe center area'
+const hardcodedLifestyleImages = [
+  { id: 'cafe-table', label: 'Cafe table', name: 'lifestyle-cafe-table.png', url: lifestyleCafeTableUrl },
+  { id: 'date-night', label: 'Date night', name: 'lifestyle-date.png', url: lifestyleDateUrl },
+  { id: 'barista-pour', label: 'Barista pour', name: 'lifestyle-barista-pour.png', url: lifestyleBaristaPourUrl },
+]
+const GENERATION_STEPS = [
+  'Reading your prompt',
+  'Studying the logo',
+  'Composing cup artwork',
+  'Rendering 3 design options',
+  'Applying the first design',
+  'Placing cup in your photos',
+]
 
 const cupSizes = {
   '8oz': { label: '8 oz', top: 80, bottom: 56, height: 92, wrapWidth: 245, wrapHeight: 92 },
@@ -112,6 +111,25 @@ const cupSizes = {
 
 function fileToUrl(file) {
   return file ? URL.createObjectURL(file) : ''
+}
+
+function fileToDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    if (!file) {
+      resolve('')
+      return
+    }
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result || ''))
+    reader.onerror = () => reject(new Error('Unable to read logo file.'))
+    reader.readAsDataURL(file)
+  })
+}
+
+async function urlToDataUrl(url) {
+  const response = await fetch(url)
+  const blob = await response.blob()
+  return fileToDataUrl(blob)
 }
 
 function colorDistance(a, b) {
@@ -164,7 +182,8 @@ function drawCoverImage(ctx, image, x, y, width, height) {
 }
 
 function drawFittedText(ctx, text, maxWidth, y, color) {
-  const safeText = text || 'YOUR LOGO'
+  const safeText = text.trim()
+  if (!safeText) return
   let fontSize = 156
   ctx.fillStyle = color
   ctx.textAlign = 'center'
@@ -175,6 +194,21 @@ function drawFittedText(ctx, text, maxWidth, y, color) {
     ctx.font = `900 ${fontSize}px Inter, Arial, sans-serif`
   }
   ctx.fillText(safeText, 0, y)
+}
+
+function buildProductionArtworkPrompt(rawPrompt, hasLogo = false) {
+  const idea = rawPrompt.trim() || DEFAULT_ARTWORK_PROMPT
+  return [
+    'Create one production-ready printable paper cup wrap artwork.',
+    `Creative direction: ${idea}.`,
+    'Output must be a flat horizontal rectangular 2D packaging design, full-bleed edge-to-edge, suitable for wrapping around a disposable coffee cup.',
+    'Use premium brand-quality composition, crisp vector-like shapes, refined color harmony, clean negative space, and a polished modern packaging look.',
+    hasLogo
+      ? 'Use the provided logo image as the brand mark. Place it once in a clean, balanced central logo area and harmonize the design colors around it. Preserve the logo shape and legibility.'
+      : 'Keep the artwork seamless across the left and right edges. Reserve a soft clean central area where a logo may be placed later, but do not draw a logo.',
+    'Do not include extra words, letters, numbers, barcodes, watermarks, dielines, crop marks, UI, photographs, cup mockups, hands, tables, shadows, perspective, or background scene.',
+    'The result should look like final print artwork, not a product render.',
+  ].join('\n')
 }
 
 async function removeLogoBackground(file) {
@@ -390,6 +424,17 @@ function createRealCup(material) {
   body.name = 'printed-cup-body'
   cup.add(body)
 
+  const innerPaperMaterial = new THREE.MeshPhysicalMaterial({
+    color: '#fffdf8',
+    roughness: 0.68,
+    clearcoat: 0.04,
+    clearcoatRoughness: 0.86,
+    side: THREE.BackSide,
+  })
+  const innerBody = new THREE.Mesh(new THREE.LatheGeometry(profile, 224), innerPaperMaterial)
+  innerBody.name = 'plain-cup-inner'
+  cup.add(innerBody)
+
   const paperEdgeMaterial = new THREE.MeshPhysicalMaterial({
     color: '#fffdf8',
     roughness: 0.46,
@@ -596,8 +641,10 @@ async function createCupTexture({
     if (bandStyle === 'double' || bandStyle === 'bottom') ctx.fillRect(0, canvas.height - 314, canvas.width, 78)
     if (bandStyle === 'wide') ctx.fillRect(0, canvas.height - 520, canvas.width, 240)
   }
-  ctx.fillStyle = 'rgba(255,255,255,0.38)'
-  ctx.fillRect(0, 0, canvas.width, canvas.height)
+  if (!wrapImage) {
+    ctx.fillStyle = 'rgba(255,255,255,0.38)'
+    ctx.fillRect(0, 0, canvas.width, canvas.height)
+  }
 
   const logoImage = await getDrawableImage(logoUrl)
   ctx.save()
@@ -664,22 +711,27 @@ export function CreateCupStudio() {
   const [logoUrl, setLogoUrl] = useState('')
   const [cupColor, setCupColor] = useState('#f3efe4')
   const [accentColor, setAccentColor] = useState('#0f766e')
-  const [brandText, setBrandText] = useState('Cafe Luna')
-  const [artworkPrompt, setArtworkPrompt] = useState('premium eco cafe cup printable wrap with leaf pattern, clean logo panel, warm minimal layout')
+  const [brandText, setBrandText] = useState('')
+  const [artworkPrompt, setArtworkPrompt] = useState(DEFAULT_ARTWORK_PROMPT)
   const [generatedArtworkUrl, setGeneratedArtworkUrl] = useState('')
+  const [generatedArtworkUrls, setGeneratedArtworkUrls] = useState([])
+  const [generatedArtworkIncludesLogo, setGeneratedArtworkIncludesLogo] = useState(false)
+  const [scenePreviewImages, setScenePreviewImages] = useState([])
+  const [selectedScenePreview, setSelectedScenePreview] = useState(null)
+  const [isGeneratingScenes, setIsGeneratingScenes] = useState(false)
   const [isGeneratingArtwork, setIsGeneratingArtwork] = useState(false)
+  const [generationElapsed, setGenerationElapsed] = useState(0)
   const [artworkError, setArtworkError] = useState('')
   const [autoRotate, setAutoRotate] = useState(true)
   const [zoom, setZoom] = useState(sceneViewDefaults.none.zoom)
-  const [editorTab, setEditorTab] = useState('design')
   const [logoScale, setLogoScale] = useState(1)
   const [logoOffsetX, setLogoOffsetX] = useState(0)
   const [logoOffsetY, setLogoOffsetY] = useState(0)
-  const [wrapOpacity, setWrapOpacity] = useState(0.96)
-  const [bandStyle, setBandStyle] = useState('double')
-  const [showLabelCard, setShowLabelCard] = useState(true)
-  const [showCaption, setShowCaption] = useState(true)
-  const [captionText, setCaptionText] = useState('CREATE YOUR CUP')
+  const [wrapOpacity, setWrapOpacity] = useState(1)
+  const [bandStyle, setBandStyle] = useState('none')
+  const [showLabelCard, setShowLabelCard] = useState(false)
+  const [showCaption, setShowCaption] = useState(false)
+  const [captionText, setCaptionText] = useState('')
   const [lidColor, setLidColor] = useState('#f8fafc')
   const [showLid, setShowLid] = useState(true)
   const [materialFinish, setMaterialFinish] = useState('matte')
@@ -693,7 +745,6 @@ export function CreateCupStudio() {
   const [cameraTargetY, setCameraTargetY] = useState(sceneViewDefaults.none.cameraTargetY)
   const [surfaceRoughness, setSurfaceRoughness] = useState(0.62)
   const [renderQuality, setRenderQuality] = useState(3)
-  const [cupSize, setCupSize] = useState('12oz')
   const [cupDimensions, setCupDimensions] = useState(cupSizes['12oz'])
   const [paperStock, setPaperStock] = useState('320 gsm PE-free kraft board')
   const [printMethod, setPrintMethod] = useState('CMYK digital')
@@ -708,6 +759,7 @@ export function CreateCupStudio() {
 
   const uploadedWrapUrl = useMemo(() => fileToUrl(wrapFile), [wrapFile])
   const wrapUrl = generatedArtworkUrl || uploadedWrapUrl
+  const textureLogoUrl = generatedArtworkUrl && generatedArtworkIncludesLogo ? '' : logoUrl
   const activeScenario = scenarios[scenario]
   const selectedCup = cupDimensions
   const exportWidth = selectedCup.wrapWidth + bleed * 2
@@ -715,27 +767,17 @@ export function CreateCupStudio() {
   const printReadiness = [
     { label: generatedArtworkUrl || wrapFile ? 'Printable design assigned' : 'Printable design missing', ok: Boolean(generatedArtworkUrl || wrapFile) },
     { label: logoFile || brandText ? 'Brand mark ready' : 'Brand mark missing', ok: Boolean(logoFile || brandText) },
-    { label: showCaption ? 'Caption visible' : 'Caption hidden', ok: showCaption },
     { label: bleed >= 3 ? 'Bleed is print safe' : 'Bleed below 3 mm', ok: bleed >= 3 },
     { label: safeMargin >= 5 ? 'Safe margin is print safe' : 'Safe margin below 5 mm', ok: safeMargin >= 5 },
     { label: seam >= 10 ? 'Glue seam reserved' : 'Glue seam too narrow', ok: seam >= 10 },
   ]
-  const tabs = [
-    { id: 'design', label: 'Design', icon: Palette },
-    { id: 'placement', label: 'Placement', icon: Layers },
-    { id: 'model', label: 'Model', icon: SlidersHorizontal },
-    { id: 'scene', label: 'Scene', icon: Coffee },
-    { id: 'output', label: 'Output', icon: Download },
-  ]
-
-  const applyCupPreset = (key) => {
-    if (!cupSizes[key]) return
-    setCupSize(key)
-    setCupDimensions(cupSizes[key])
-  }
-
+  const isGeneratingExperience = isGeneratingArtwork || isGeneratingScenes
+  const generationStepIndex = Math.min(
+    GENERATION_STEPS.length - 1,
+    isGeneratingScenes ? 5 : Math.floor(generationElapsed / 6),
+  )
+  const generationStep = GENERATION_STEPS[generationStepIndex]
   const updateCupDimension = (key, value) => {
-    setCupSize('custom')
     setCupDimensions((current) => ({
       ...current,
       label: 'Custom',
@@ -745,6 +787,10 @@ export function CreateCupStudio() {
 
   const handleLogoUpload = async (file) => {
     setLogoFile(file)
+    if (generatedArtworkUrl) setGeneratedArtworkIncludesLogo(false)
+    setScenePreviewImages([])
+    setSelectedScenePreview(null)
+    setArtworkError('')
     if (!file) {
       setLogoUrl('')
       return
@@ -760,12 +806,18 @@ export function CreateCupStudio() {
   const clearWrapFile = () => {
     setWrapFile(null)
     setGeneratedArtworkUrl('')
+    setGeneratedArtworkUrls([])
+    setGeneratedArtworkIncludesLogo(false)
+    setScenePreviewImages([])
+    setSelectedScenePreview(null)
     if (wrapInputRef.current) wrapInputRef.current.value = ''
   }
 
   const clearLogoFile = () => {
     setLogoFile(null)
     setLogoUrl('')
+    setScenePreviewImages([])
+    setSelectedScenePreview(null)
     if (logoInputRef.current) logoInputRef.current.value = ''
   }
 
@@ -787,20 +839,24 @@ export function CreateCupStudio() {
     setLogoUrl('')
     if (wrapInputRef.current) wrapInputRef.current.value = ''
     if (logoInputRef.current) logoInputRef.current.value = ''
-    setBrandText('MaDonals')
-    setArtworkPrompt('premium eco cafe cup printable wrap with leaf pattern, clean logo panel, warm minimal layout')
+    setScenePreviewImages([])
+    setSelectedScenePreview(null)
+    setBrandText('')
+    setArtworkPrompt(DEFAULT_ARTWORK_PROMPT)
     setGeneratedArtworkUrl('')
+    setGeneratedArtworkUrls([])
+    setGeneratedArtworkIncludesLogo(false)
     setArtworkError('')
-    setCaptionText('CREATE YOUR CUP')
+    setCaptionText('')
     setCupColor('#f3efe4')
     setAccentColor(activeScenario.accent)
     setLogoScale(1)
     setLogoOffsetX(0)
     setLogoOffsetY(0)
-    setWrapOpacity(0.96)
-    setBandStyle('double')
-    setShowLabelCard(true)
-    setShowCaption(true)
+    setWrapOpacity(1)
+    setBandStyle('none')
+    setShowLabelCard(false)
+    setShowCaption(false)
     setLidColor('#f8fafc')
     setShowLid(true)
     setMaterialFinish('matte')
@@ -816,7 +872,6 @@ export function CreateCupStudio() {
     setRenderQuality(3)
     setZoom(sceneViewDefaults[scenario].zoom)
     setAutoRotate(true)
-    setCupSize('12oz')
     setCupDimensions(cupSizes['12oz'])
     setBleed(3)
     setSafeMargin(5)
@@ -847,6 +902,10 @@ export function CreateCupStudio() {
   }
 
   const exportPreviewPng = () => {
+    if (selectedScenePreview?.imageUrl) {
+      downloadUrl(selectedScenePreview.imageUrl, `${selectedScenePreview.id || 'lifestyle-cup'}.png`)
+      return
+    }
     const renderer = rendererRef.current
     const scene = sceneRef.current
     const camera = cameraRef.current
@@ -858,7 +917,7 @@ export function CreateCupStudio() {
   const exportPrintDesignPng = async () => {
     const texture = await createCupTexture({
       wrapUrl,
-      logoUrl,
+      logoUrl: textureLogoUrl,
       cupColor,
       accentColor,
       brandText,
@@ -920,6 +979,17 @@ export function CreateCupStudio() {
   }, [autoRotate])
 
   useEffect(() => {
+    if (!isGeneratingExperience) {
+      return undefined
+    }
+    const startedAt = Date.now()
+    const timer = window.setInterval(() => {
+      setGenerationElapsed(Math.floor((Date.now() - startedAt) / 1000))
+    }, 1000)
+    return () => window.clearInterval(timer)
+  }, [isGeneratingExperience])
+
+  useEffect(() => {
     return () => {
       if (uploadedWrapUrl) URL.revokeObjectURL(uploadedWrapUrl)
       if (logoUrl.startsWith('blob:')) URL.revokeObjectURL(logoUrl)
@@ -928,22 +998,105 @@ export function CreateCupStudio() {
 
   const generateArtwork = async () => {
     setArtworkError('')
+    setScenePreviewImages([])
+    setSelectedScenePreview(null)
+    setGenerationElapsed(0)
     setIsGeneratingArtwork(true)
     try {
-      const puter = await loadPuter()
-      // const prompt = artworkPrompt,
-      const image = await puter.ai.txt2img(artworkPrompt, {
-        provider: 'openai-image-generation',
-        model: 'gpt-image-1-mini',
-        quality: 'high',
+      const logoDataUrl = logoUrl.startsWith('data:') ? logoUrl : await fileToDataUrl(logoFile)
+      const prompt = buildProductionArtworkPrompt(artworkPrompt, Boolean(logoDataUrl))
+      const response = await fetch('/api/generate-artwork', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt,
+          count: 3,
+          logoImage: logoDataUrl
+            ? {
+              dataUrl: logoDataUrl,
+              name: logoFile.name,
+              type: logoFile.type,
+            }
+            : null,
+        }),
       })
-      setGeneratedArtworkUrl(image.src)
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) {
+        throw new Error(data.error || 'Unable to generate artwork with OpenAI.')
+      }
+      const variations = data.imageUrls?.length ? data.imageUrls : [data.imageUrl].filter(Boolean)
+      setGeneratedArtworkUrls(variations)
+      setGeneratedArtworkUrl(variations[0] || '')
+      setGeneratedArtworkIncludesLogo(Boolean(logoDataUrl))
     } catch (error) {
       setArtworkError(error.message)
+      setIsGeneratingScenes(false)
     } finally {
       setIsGeneratingArtwork(false)
     }
   }
+
+  const getCurrentDesignDataUrl = useCallback(async () => {
+    const texture = await createCupTexture({
+      wrapUrl,
+      logoUrl: textureLogoUrl,
+      cupColor,
+      accentColor,
+      brandText,
+      logoScale,
+      logoOffsetX,
+      logoOffsetY,
+      wrapOpacity,
+      bandStyle,
+      showLabelCard,
+      showCaption,
+      captionText,
+    })
+    const sourceCanvas = texture?.userData.sourceCanvas
+    const dataUrl = sourceCanvas?.toDataURL('image/png') || ''
+    texture?.dispose()
+    return dataUrl
+  }, [wrapUrl, textureLogoUrl, cupColor, accentColor, brandText, logoScale, logoOffsetX, logoOffsetY, wrapOpacity, bandStyle, showLabelCard, showCaption, captionText])
+
+  const placeCupInLifestyleImages = useCallback(async (designOverride = null) => {
+    setArtworkError('')
+    setScenePreviewImages([])
+    setSelectedScenePreview(null)
+    setGenerationElapsed(0)
+    setIsGeneratingScenes(true)
+    try {
+      const designDataUrl = designOverride || await getCurrentDesignDataUrl()
+      if (!designDataUrl) throw new Error('Generate or upload a cup design first.')
+      const sceneImages = await Promise.all(hardcodedLifestyleImages.map(async (image) => ({
+        id: image.id,
+        label: image.label,
+        name: image.name,
+        dataUrl: await urlToDataUrl(image.url),
+      })))
+      const response = await fetch('/api/place-cup-scenes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          designImage: {
+            dataUrl: designDataUrl,
+            name: 'selected-cup-design.png',
+          },
+          sceneImages,
+        }),
+      })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) {
+        throw new Error(data.error || 'Unable to place cup in lifestyle images.')
+      }
+      const scenes = data.scenes || []
+      setScenePreviewImages(scenes)
+      setSelectedScenePreview(scenes[0] || null)
+    } catch (error) {
+      setArtworkError(error.message)
+    } finally {
+      setIsGeneratingScenes(false)
+    }
+  }, [getCurrentDesignDataUrl])
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -1031,7 +1184,7 @@ export function CreateCupStudio() {
       metalness: 0,
       clearcoat: 0.06,
       clearcoatRoughness: 0.82,
-      side: THREE.DoubleSide,
+      side: THREE.FrontSide,
     })
     materialRef.current = material
 
@@ -1057,7 +1210,9 @@ export function CreateCupStudio() {
       camera.aspect = width / height
       camera.updateProjectionMatrix()
     }
+    const resizeObserver = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(resize) : null
     resize()
+    resizeObserver?.observe(canvas)
     window.addEventListener('resize', resize)
 
     let frame = 0
@@ -1072,6 +1227,7 @@ export function CreateCupStudio() {
     return () => {
       window.cancelAnimationFrame(frame)
       window.removeEventListener('resize', resize)
+      resizeObserver?.disconnect()
       controls.dispose()
       scene.traverse((child) => {
         if (child.isMesh) {
@@ -1098,7 +1254,7 @@ export function CreateCupStudio() {
     let disposed = false
     createCupTexture({
       wrapUrl,
-      logoUrl,
+      logoUrl: textureLogoUrl,
       cupColor,
       accentColor,
       brandText,
@@ -1129,7 +1285,7 @@ export function CreateCupStudio() {
     return () => {
       disposed = true
     }
-  }, [wrapUrl, logoUrl, cupColor, accentColor, brandText, logoScale, logoOffsetX, logoOffsetY, wrapOpacity, bandStyle, showLabelCard, showCaption, captionText])
+  }, [wrapUrl, textureLogoUrl, cupColor, accentColor, brandText, logoScale, logoOffsetX, logoOffsetY, wrapOpacity, bandStyle, showLabelCard, showCaption, captionText])
 
   useEffect(() => {
     const scene = sceneRef.current
@@ -1222,7 +1378,7 @@ export function CreateCupStudio() {
     const cup = cupRef.current
     if (!cup) return
     const placementScale = sceneModelPlacement[scenario]?.scale ?? 1
-    const diameterScale = Math.max(0.72, Math.min(1.28, selectedCup.top / 90)) * placementScale
+    const diameterScale = Math.max(0.72, Math.min(1.28, selectedCup.top / 90)) * placementScale * CUP_MODEL_WIDTH_SCALE
     const heightScale = Math.max(0.72, Math.min(1.32, selectedCup.height / 112)) * placementScale
     cup.scale.set(diameterScale, heightScale, diameterScale)
   }, [scenario, selectedCup.top, selectedCup.height])
@@ -1232,47 +1388,86 @@ export function CreateCupStudio() {
       <aside className="editor-sidebar">
         <div>
           <p className="editor-kicker">Create Your Cup</p>
-          <h1>Cup editor</h1>
-          <p className="editor-copy">Generate a printable cup wrap, place your logo, and preview the same cup in real customer scenarios.</p>
+          <h1>CUP STUDIO</h1>
+          {/* <p className="editor-copy">Generate a printable cup wrap, place your logo, and preview the same cup in real customer scenarios.</p> */}
         </div>
 
-        <nav className="editor-tabs">
-          {tabs.map((tab) => {
-            const Icon = tab.icon
-            return (
-              <button className={editorTab === tab.id ? 'active' : ''} key={tab.id} type="button" onClick={() => setEditorTab(tab.id)}>
-                <Icon size={15} />
-                {tab.label}
-              </button>
-            )
-          })}
-        </nav>
-
-        {editorTab === 'design' && (
-          <section className="editor-panel">
-            <h2>Printable design and brand</h2>
+        <section className="editor-panel">
+            <h2>Write Prompt to Generate Design</h2>
             <label className="editor-field">
-              <span>Printable design prompt</span>
+              {/* <span>Printable design prompt</span> */}
               <textarea
                 className="prompt-input"
                 value={artworkPrompt}
                 onChange={(event) => setArtworkPrompt(event.target.value)}
-                placeholder="Example: premium eco cafe wrap with leaf pattern, clean logo panel, warm minimal layout"
+                placeholder="Example: minimal botanical cafe packaging with warm green accents"
               />
             </label>
             <div className="prompt-actions">
               <Button type="button" disabled={isGeneratingArtwork || artworkPrompt.trim().length < 8} onClick={generateArtwork}>
-                {isGeneratingArtwork ? 'Generating...' : 'Generate printable design'}
+                {isGeneratingArtwork ? 'Generating...' : 'Generate Design'}
               </Button>
-              {generatedArtworkUrl && <button className="clear-button" type="button" onClick={() => setGeneratedArtworkUrl('')}>Use upload/base</button>}
+              {generatedArtworkUrl && <button className="clear-button" type="button" onClick={() => {
+                setGeneratedArtworkUrl('')
+                setGeneratedArtworkUrls([])
+                setGeneratedArtworkIncludesLogo(false)
+                setScenePreviewImages([])
+                setSelectedScenePreview(null)
+              }}>Clear generated image</button>}
             </div>
             {artworkError && <p className="editor-error">{artworkError}</p>}
+            {isGeneratingExperience && (
+              <div className="generation-progress" role="status" aria-live="polite">
+                <div className="generation-progress-top">
+                  <span>{generationStep}</span>
+                  <b>{generationElapsed < 60 ? `${generationElapsed}s` : `${Math.floor(generationElapsed / 60)}m ${generationElapsed % 60}s`}</b>
+                </div>
+                <div className="generation-bar">
+                  <i style={{ width: `${Math.min(92, 18 + generationStepIndex * 14 + (generationElapsed % 6) * 2)}%` }} />
+                </div>
+                <p>{isGeneratingScenes ? 'Replacing the cup in the fixed lifestyle image now.' : 'OpenAI is creating polished packaging options. You can keep editing after the designs arrive.'}</p>
+              </div>
+            )}
+            {isGeneratingArtwork && generatedArtworkUrls.length === 0 && (
+              <div className="variation-grid variation-grid-loading" aria-hidden="true">
+                {[0, 1, 2].map((item) => (
+                  <div className="loading-tile" key={item}>
+                    <span>{item + 1}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            {generatedArtworkUrls.length > 0 && (
+              <div className="variation-grid" aria-label="Generated design variations">
+                {generatedArtworkUrls.map((url, index) => (
+                  <button
+                    className={generatedArtworkUrl === url ? 'active' : ''}
+                    key={url}
+                    type="button"
+                    onClick={() => {
+                      setGeneratedArtworkUrl(url)
+                      setScenePreviewImages([])
+                      setSelectedScenePreview(null)
+                    }}
+                    title={`Use generated design ${index + 1}`}
+                    aria-label={`Use generated design ${index + 1}`}
+                  >
+                    <img src={url} alt="" />
+                    <span>{index + 1}</span>
+                  </button>
+                ))}
+              </div>
+            )}
             <label className="editor-upload">
               <span><ImageUp size={16} /> Print design upload</span>
               <div className="upload-file-row">
                 <Input ref={wrapInputRef} type="file" accept="image/png,image/jpeg,image/svg+xml" onChange={(event) => {
                   setWrapFile(event.target.files?.[0] ?? null)
                   setGeneratedArtworkUrl('')
+                  setGeneratedArtworkUrls([])
+                  setGeneratedArtworkIncludesLogo(false)
+                  setScenePreviewImages([])
+                  setSelectedScenePreview(null)
                 }} />
                 {(wrapFile || generatedArtworkUrl) && (
                   <button className="remove-file-button" type="button" onClick={clearWrapFile} title="Remove image file" aria-label="Remove image file">
@@ -1292,136 +1487,14 @@ export function CreateCupStudio() {
                 )}
               </div>
             </label>
-            <label className="editor-field">
-              <span>Brand text</span>
-              <Input value={brandText} onChange={(event) => setBrandText(event.target.value)} />
-            </label>
-            <label className="editor-field">
-              <span>Caption</span>
-              <Input value={captionText} onChange={(event) => setCaptionText(event.target.value)} />
-            </label>
-            <div className="color-row">
-              <label><span>Cup</span><input type="color" value={cupColor} onChange={(event) => setCupColor(event.target.value)} /></label>
-              <label><span>Accent</span><input type="color" value={accentColor} onChange={(event) => setAccentColor(event.target.value)} /></label>
-            </div>
-          </section>
-        )}
-
-        {editorTab === 'placement' && (
-          <section className="editor-panel">
-            <h2>Logo and wrap placement</h2>
-            <RangeControl label="Logo scale" min={0.55} max={1.55} step={0.05} value={logoScale} onChange={setLogoScale} />
-            <RangeControl label="Logo X" min={-700} max={700} step={20} value={logoOffsetX} onChange={setLogoOffsetX} />
-            <RangeControl label="Logo Y" min={-520} max={520} step={20} value={logoOffsetY} onChange={setLogoOffsetY} />
-            <RangeControl label="Print design opacity" min={0.2} max={1} step={0.02} value={wrapOpacity} onChange={setWrapOpacity} />
-            <label className="editor-field">
-              <span>Band style</span>
-              <select value={bandStyle} onChange={(event) => setBandStyle(event.target.value)}>
-                <option value="double">Top and bottom</option>
-                <option value="top">Top only</option>
-                <option value="bottom">Bottom only</option>
-                <option value="wide">Wide sleeve band</option>
-                <option value="none">No bands</option>
-              </select>
-            </label>
-            <ToggleControl label="White logo card" checked={showLabelCard} onChange={setShowLabelCard} />
-            <ToggleControl label="Caption text" checked={showCaption} onChange={setShowCaption} />
-          </section>
-        )}
-
-        {editorTab === 'model' && (
-          <section className="editor-panel">
-            <h2>Cup model</h2>
-            <label className="editor-field">
-              <span>Cup size</span>
-              <select value={cupSize} onChange={(event) => applyCupPreset(event.target.value)}>
-                {Object.entries(cupSizes).map(([key, size]) => <option key={key} value={key}>{size.label}</option>)}
-                {cupSize === 'custom' && <option value="custom">Custom</option>}
-              </select>
-            </label>
-            <label className="editor-field">
-              <span>Paper finish</span>
-              <select value={materialFinish} onChange={(event) => setMaterialFinish(event.target.value)}>
-                <option value="matte">Matte paper</option>
-                <option value="satin">Satin coated</option>
-                <option value="gloss">Glossy coated</option>
-              </select>
-            </label>
+            <Button type="button" disabled={isGeneratingScenes || (!generatedArtworkUrl && !wrapFile)} onClick={() => placeCupInLifestyleImages()}>
+              {isGeneratingScenes ? 'Creating lifestyle image...' : 'Create lifestyle image'}
+            </Button>
             <ToggleControl label="Show plastic lid" checked={showLid} onChange={setShowLid} />
             <label className="editor-field">
               <span>Lid color</span>
               <input type="color" value={lidColor} onChange={(event) => setLidColor(event.target.value)} />
             </label>
-            <label className="editor-field">
-              <span>Paper stock</span>
-              <select value={paperStock} onChange={(event) => setPaperStock(event.target.value)}>
-                <option value="280 gsm white cup stock">280 gsm white cup stock</option>
-                <option value="320 gsm PE-free kraft board">320 gsm PE-free kraft board</option>
-                <option value="350 gsm double-wall board">350 gsm double-wall board</option>
-              </select>
-            </label>
-            <label className="editor-field">
-              <span>Coating</span>
-              <select value={coating} onChange={(event) => setCoating(event.target.value)}>
-                <option value="water-based matte">Water-based matte</option>
-                <option value="aqueous satin">Aqueous satin</option>
-                <option value="compostable PLA lining">Compostable PLA lining</option>
-              </select>
-            </label>
-          </section>
-        )}
-
-        {editorTab === 'scene' && (
-          <section className="editor-panel">
-            <h2>Scene and camera</h2>
-            <div className="scenario-grid">
-              {Object.entries(scenarios).map(([key, item]) => {
-                const Icon = item.icon
-                return (
-                  <button className={scenario === key ? 'scenario-button active' : 'scenario-button'} key={key} type="button" onClick={() => selectScenario(key)}>
-                    <Icon size={17} />
-                    <span>{item.label}</span>
-                  </button>
-                )
-              })}
-            </div>
-            <Button type="button" onClick={() => setAutoRotate((value) => !value)}>
-              <RotateCcw size={16} /> {autoRotate ? 'Pause rotation' : 'Auto rotate'}
-            </Button>
-            <div className="scene-control-group">
-              <span>Camera</span>
-              <RangeControl label="Zoom distance" min={3.8} max={7.2} step={0.1} value={zoom} onChange={setZoom} />
-              <RangeControl label="Camera height" min={0.55} max={2.4} step={0.05} value={cameraHeight} onChange={setCameraHeight} />
-              <RangeControl label="Camera horizontal" min={-1.6} max={1.6} step={0.05} value={cameraX} onChange={setCameraX} />
-              <RangeControl label="Lens FOV" min={26} max={55} step={1} value={cameraFov} onChange={setCameraFov} suffix="deg" />
-              <RangeControl label="Target height" min={-0.55} max={0.9} step={0.05} value={cameraTargetY} onChange={setCameraTargetY} />
-            </div>
-            <div className="scene-control-group">
-              <span>Realistic light</span>
-              <RangeControl label="Key light" min={1.2} max={6.5} step={0.1} value={lightIntensity} onChange={setLightIntensity} />
-              <RangeControl label="Fill light" min={0} max={3.5} step={0.1} value={fillIntensity} onChange={setFillIntensity} />
-              <RangeControl label="Rim light" min={0} max={4} step={0.1} value={rimIntensity} onChange={setRimIntensity} />
-              <RangeControl label="Exposure" min={0.65} max={1.7} step={0.01} value={exposure} onChange={setExposure} />
-              <RangeControl label="Surface roughness" min={0.18} max={0.95} step={0.01} value={surfaceRoughness} onChange={setSurfaceRoughness} />
-            </div>
-          </section>
-        )}
-
-        {editorTab === 'output' && (
-          <section className="editor-panel">
-            <h2>Preview quality</h2>
-            <RangeControl label="Render quality" min={1} max={3} step={0.25} value={renderQuality} onChange={setRenderQuality} suffix="x" />
-            <label className="editor-field">
-              <span>Print method</span>
-              <select value={printMethod} onChange={(event) => setPrintMethod(event.target.value)}>
-                <option value="CMYK digital">CMYK digital</option>
-                <option value="Offset litho">Offset litho</option>
-                <option value="Flexographic">Flexographic</option>
-              </select>
-            </label>
-            <RangeControl label="Bleed" min={2} max={6} step={0.5} value={bleed} onChange={setBleed} suffix="mm" />
-            <RangeControl label="Safe margin" min={3} max={10} step={0.5} value={safeMargin} onChange={setSafeMargin} suffix="mm" />
-            <RangeControl label="Glue seam" min={8} max={18} step={1} value={seam} onChange={setSeam} suffix="mm" />
             <label className="editor-field">
               <span>Export package</span>
               <select value={exportFormat} onChange={(event) => setExportFormat(event.target.value)}>
@@ -1430,38 +1503,30 @@ export function CreateCupStudio() {
                 <option value="SVG dieline + transparent PNG">SVG dieline + transparent PNG</option>
               </select>
             </label>
-            <div className="spec-grid">
-              <div><span>Texture</span><b>{TEXTURE_WIDTH} x {TEXTURE_HEIGHT}</b></div>
-              <div><span>Scenario</span><b>{activeScenario.label}</b></div>
-              <div><span>Finish</span><b>{materialFinish}</b></div>
-              <div><span>Lid</span><b>{showLid ? 'visible' : 'hidden'}</b></div>
-            </div>
             <div className="export-actions">
               <Button type="button" onClick={exportPreviewPng}><Download size={16} /> Preview PNG</Button>
               <Button type="button" onClick={exportPrintDesignPng}><Download size={16} /> Print design PNG</Button>
               <button className="clear-button" type="button" onClick={exportDielineSvg}><Download size={15} /> Dieline SVG</button>
               <button className="clear-button" type="button" onClick={exportProductionSpec}><Download size={15} /> Spec JSON</button>
             </div>
-            <button className="clear-button" type="button" onClick={resetEditor}>
-              <Trash2 size={15} /> Reset full editor
-            </button>
-          </section>
-        )}
+        </section>
       </aside>
 
       <section className="editor-stage">
         <div className="stage-toolbar">
           <div>
-            <span>{activeScenario.label}</span>
+            <span>{selectedScenePreview ? 'Lifestyle image' : activeScenario.label}</span>
             <strong>
-              {scenario === 'none'
+              {selectedScenePreview
+                ? selectedScenePreview.label
+                : scenario === 'none'
                 ? 'Clean studio preview'
                 : scenario === 'hand'
                   ? 'Customer hand preview'
                   : `${activeScenario.label} preview`}
             </strong>
           </div>
-          <div className="stage-status">Drag to rotate</div>
+          <div className="stage-status">{selectedScenePreview ? 'Download from camera button' : 'Drag to rotate'}</div>
         </div>
         <div className="canvas-control-hub" aria-label="Canvas cup controls">
           <button className="canvas-pill-button" type="button" onClick={resetEditor} title="Reset editor">
@@ -1471,7 +1536,7 @@ export function CreateCupStudio() {
           <button className="canvas-icon-button canvas-play-button" type="button" onClick={() => setAutoRotate((value) => !value)} title={autoRotate ? 'Pause rotation' : 'Play rotation'} aria-label={autoRotate ? 'Pause rotation' : 'Play rotation'}>
             {autoRotate ? <Pause size={18} /> : <Play size={18} />}
           </button>
-          <button className="canvas-icon-button" type="button" onClick={exportPreviewPng} title="Capture preview" aria-label="Capture preview image">
+          <button className="canvas-icon-button" type="button" onClick={exportPreviewPng} title={selectedScenePreview ? 'Download selected lifestyle image' : 'Capture preview'} aria-label={selectedScenePreview ? 'Download selected lifestyle image' : 'Capture preview image'}>
             <Camera size={17} />
           </button>
           <div className="canvas-scene-controls" aria-label="Scene presets">
@@ -1491,7 +1556,37 @@ export function CreateCupStudio() {
             <button type="button" onClick={() => setCupAngle(-Math.PI / 2)} title="Left angle">Left</button>
           </div>
         </div>
-        <canvas ref={canvasRef} className="cup-canvas" aria-label="3D cup editor preview" />
+        {isGeneratingExperience && (
+          <div className="stage-generation-overlay" role="status" aria-live="polite">
+            <div className="stage-generation-card">
+              <span>AI studio</span>
+              <strong>{generationStep}</strong>
+              <p>{isGeneratingScenes ? 'Replacing the cup in the fixed lifestyle image.' : 'Your cup preview will update as soon as the first design is ready.'}</p>
+            </div>
+          </div>
+        )}
+        <canvas ref={canvasRef} className={selectedScenePreview ? 'cup-canvas cup-canvas-muted' : 'cup-canvas'} aria-label="3D cup editor preview" />
+        {selectedScenePreview && (
+          <div className="lifestyle-stage-preview">
+            <img src={selectedScenePreview.imageUrl} alt={selectedScenePreview.label} />
+          </div>
+        )}
+        {scenePreviewImages.length > 1 && (
+          <div className="lifestyle-stage-switcher" aria-label="Lifestyle image selector">
+            {scenePreviewImages.map((scene, index) => (
+              <button
+                className={selectedScenePreview?.imageUrl === scene.imageUrl ? 'active' : ''}
+                key={scene.id || scene.imageUrl}
+                type="button"
+                onClick={() => setSelectedScenePreview(scene)}
+                title={`Show ${scene.label}`}
+                aria-label={`Show lifestyle image ${index + 1}`}
+              >
+                {index + 1}
+              </button>
+            ))}
+          </div>
+        )}
       </section>
 
       <aside className="details-sidebar">
